@@ -2132,7 +2132,7 @@ def plot_global_two_param_fit(
     ax.set_xscale("log", base=2)
     ax.set_yscale("log", base=2)
     ax.set_xlabel(
-        f"First horizon to reach optimal norm [tokens]",
+        f"Horizon reaching optimal norm [tokens]",
         fontsize=axis_label_fontsize,
     )
     ax.set_ylabel(r"$\eta$", fontsize=axis_label_fontsize)
@@ -2440,11 +2440,12 @@ def plot_norm_vs_horizon_by_lr_bs(df, lr_values=None, bs_values=None, x_col='hor
                     #    alpha=alpha,
                        )
     
-    ax.tick_params(axis="both", which="both", labelsize=22)
-    ax.set_xlabel(x_col.capitalize(), fontsize=22)
-    ax.set_ylabel(r"log₂||$W_\mathrm{out}$||$_{\mathrm{RMS} \to \infty}$", fontsize=22)
-    # ax.set_ylabel('Output Norm', fontsize=22)
-    ax.set_title(f"Output norm vs {x_col}" + r" for different $(\eta, B)$ combinations", fontsize=22)
+    ax.tick_params(axis="both", which="both", labelsize=28)
+    xlabel = x_col.capitalize() if x_col.lower() != 'horizon' else 'Horizon [tokens]'
+    ax.set_xlabel(xlabel, fontsize=28)
+    ax.set_ylabel(r"||$W_\mathrm{out}$||$_{\mathrm{RMS} \to \infty}$", fontsize=28)
+    # ax.set_ylabel('Output Norm', fontsize=28)
+    ax.set_title(f"Output norm vs {x_col}" + r" for different $(\eta, B)$", fontsize=28)
     
     # Set log scale for x-axis if it's horizon, otherwise use linear
     if x_col.lower() == 'horizon':
@@ -2458,7 +2459,7 @@ def plot_norm_vs_horizon_by_lr_bs(df, lr_values=None, bs_values=None, x_col='hor
     # Create custom legend
     n_combinations = len(unique_bs) * len(unique_lr)
     if n_combinations <= 20:
-        ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=15)
+        ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=18)
     else:
         # Create a simplified legend showing BS values only
         legend_elements = []
