@@ -6,6 +6,8 @@ This toolkit has been extensively used to analyse data for our work ["Optimal Sc
 
 > Despite recent progress in optimal hyperparameter transfer under model and dataset scaling, no unifying explanatory principle has been established. Using the Scion optimizer, we discover that joint optimal scaling across model and dataset sizes is governed by a single invariant: the operator norm of the output layer. Across models with up to 1.3B parameters trained on up to 138B tokens, the optimal learning rate/batch size pair (η∗, B∗) consistently has the same operator norm value – a phenomenon we term norm transfer. This constant norm condition is necessary but not sufficient: while for each dataset size, multiple (η, B) reach the optimal norm, only a unique (η∗, B∗) achieves the best loss. As a sufficient condition, we provide the first measurement of (η∗, B∗) scaling with dataset size for Scion, and find that the scaling rules are consistent with those of the Adam optimizer. Tuning per-layer-group learning rates also improves model performance, with the output layer being the most sensitive and hidden layers benefiting from lower learning rates. We provide practical insights on norm-guided optimal scaling and release our Distributed Scion (Disco) implementation with logs from over two thousand runs to support research on LLM training dynamics at scale
 
+Check out also our Distributed Scion repo, optimized for training at scale: https://github.com/SDLAML/disco/ 
+
 ## Repository highlights
 - Command line scripts to pull sweep histories from W&B and to normalise the CSV layout used throughout the analysis.
 - Reusable fitting utilities that locate quadratic minima for each (horizon, batch size) pair and expose a configurable analysis `Config` dataclass.
