@@ -107,14 +107,15 @@ def compute_optimum(
     fit a parabola using weighted least squares with weights ``1/σ_y²``.
     """
 
-    # always-available empirical seed/fallback
+    # Use the empirical minimum as a seed and guaranteed fallback.
     i_emp = int(np.argmin(y))
     x_emp, y_emp = float(x[i_emp]), float(y[i_emp])
 
+    # Honor configurations that request the empirical optimum directly.
     if not from_fit:
         return Fit(x_emp, y_emp, None, None, None)
 
-    # ensure 1D float arrays
+    # Normalize input arrays to flat float vectors and validate optional noise estimates.
     x  = np.asarray(x, dtype=float).ravel()
     y  = np.asarray(y, dtype=float).ravel()
     nx = len(x)
@@ -124,6 +125,7 @@ def compute_optimum(
             raise ValueError("y_std must have the same length as x and y.")
 
     # ----- choose local subset around the empirical min -----
+    # Either use all points or restrict to the nearest ``fit_k`` observations.
     if fit_k is None or fit_k >= len(x):
         idx = np.arange(len(x))
     else:
@@ -151,10 +153,12 @@ def compute_optimum(
                     if left and right:
                         break
 
+    # Slice arrays down to the selected subset for fitting.
     xs, ys = x[idx], y[idx]
     ys_std = y_std[idx] if y_std is not None else None
 
     # ----- build initial weights from y-uncertainty (or uniform) -----
+    # Convert y-standard deviations into inverse-variance weights when provided.
     if ys_std is None:
         w = np.ones_like(xs)
     else:
@@ -162,24 +166,27 @@ def compute_optimum(
         var = np.maximum(var, min_var)
         w = 1.0 / var
 
+    # Fit the quadratic; fall back to the best empirical point if it is nearly flat.
     a, b, c = _quad_fit_w(xs, ys, w, c_fixed)
     if abs(a) < 1e-10:
         j = int(np.argmin(ys))
         return Fit(float(xs[j]), float(ys[j]), None, None, None)
 
-    # vertex of the parabola
+    # Vertex of the parabola: compute analytically from the coefficients.
     x0 = -b / (2.0 * a)
     y0 = c - (b ** 2) / (4.0 * a)
 
-    # warning if extrapolated minima outside local window
+    # Warning if extrapolated minima fall outside the local window.
     xmin, xmax = float(xs.min()), float(xs.max())
     if not (xmin <= x0 <= xmax):
         print('\n(xmin <= x0 <= xmax) violated; ignoring and fitting anyway\n')
 
+    # Optionally snap to the closest observed point when configured.
     if optimum_from_closest:
         j = int(np.argmin((xs - x0) ** 2 + (ys - y0) ** 2))
         x0, y0 = float(xs[j]), float(ys[j])
 
+    # Return the fitted minimum and coefficients for downstream consumers.
     return Fit(float(x0), float(y0), float(a), float(b), float(c))
 
 
@@ -195,19 +202,23 @@ def select_avg_window_at_horizon(
     and log-space standard deviations) or ``None`` if the horizon is never
     reached.
     """
+    # Bail out if there are no observations for this trajectory.
     if g.empty:
         return None
 
+    # Sort by step so the window arithmetic operates on monotonically increasing steps.
     g_sorted = g.sort_values("step")
     reached = g_sorted[g_sorted["horizon"] == horizon]
     if reached.empty:
         return None
 
+    # Identify the first row that reaches the horizon and remember its position.
     horizon_row = reached.iloc[0]
     pos = g_sorted.index.get_loc(horizon_row.name)
     if isinstance(pos, (slice, np.ndarray)):
         pos = int(np.atleast_1d(pos)[0])
 
+    # Reuse the batch size recorded for this trajectory.
     bs_val = int(g_sorted["bs"].iloc[0])
 
     # decide whether to apply the step-window averaging for this (h, bs)
@@ -216,9 +227,11 @@ def select_avg_window_at_horizon(
             return True
         return value in set(vals)
 
+    # Check if averaging is enabled for both the horizon and batch selections.
     apply_window = _selected(cfg.average_h, horizon) and _selected(cfg.average_bs, bs_val)
 
     if not apply_window:
+        # Without averaging, return the raw horizon row with zeroed spreads.
         out = float(horizon_row["output_norm"])
         if out <= 0:
             raise ValueError("output_norm must be > 0 to take log2.")
@@ -236,7 +249,7 @@ def select_avg_window_at_horizon(
             }
         )
 
-    # window-averaging path
+    # Window-averaging path: translate the relative bounds into absolute indices around ``pos``.
     A = int(cfg.avg_rel_from)
     B = int(cfg.avg_rel_to)
     if A > 0:
@@ -245,6 +258,7 @@ def select_avg_window_at_horizon(
     start_pos = pos + start_rel
     end_pos   = pos + end_rel
 
+    # Clamp the window to the data range and optionally fall back when empty.
     n = len(g_sorted)
     start_pos_clamped = max(0, start_pos)
     end_pos_clamped   = min(n - 1, end_pos)
@@ -254,13 +268,14 @@ def select_avg_window_at_horizon(
             raise IndexError(f"Window [{A}, {B}] around pos={pos} is empty after clamping.")
         start_pos_clamped = end_pos_clamped = pos
 
+    # Extract the desired window (or the single horizon row as a fallback).
     window = g_sorted.iloc[start_pos_clamped : end_pos_clamped + 1]
     if window.empty:
         if cfg.strict_avg:
             raise IndexError("Averaging window is empty.")
         window = reached
 
-    # averages and stds
+    # Averages and stds: aggregate norms in log space to produce a geometric mean and spread.
     out_vals = window["output_norm"].astype(float).to_numpy()
     if np.any(out_vals <= 0):
         raise ValueError("output_norm must be > 0 to take log2.")
@@ -270,12 +285,14 @@ def select_avg_window_at_horizon(
 
     out_norm_geom_mean = float(2.0 ** log2_out_norm_avg)
 
+    # Average the loss values within the window and record their dispersion.
     loss_vals = window["train_loss"].astype(float).to_numpy()
     loss_avg  = float(np.mean(loss_vals))
     loss_std  = float(np.std(loss_vals))                  # population std (ddof=0)
 
     lr_val   = float(g_sorted["lr"].iloc[0])
 
+    # Emit the aggregated statistics for downstream analysis.
     return pd.Series(
         {
             "bs": bs_val,
@@ -295,14 +312,17 @@ def build_minima_df(df: pd.DataFrame, cfg: Config) -> pd.DataFrame:
     """Collect per-horizon minima, optionally fitted with quadratics, into a dataframe."""
     frames: list[dict] = []
 
+    # Work on a float-typed copy so downstream math is predictable.
     work = df.copy()
     work["output_norm"] = work["output_norm"].astype(float)
     work["train_loss"]  = work["train_loss"].astype(float)
     work["lr"]          = work["lr"].astype(float)
 
+    # Precompute (horizon, batch size) pairs where fitting should be skipped.
     skip_pairs = {(int(hh), int(bb)) for hh, bb in cfg.skip_fit}
 
     for h in cfg.horizons:
+        # Collect one averaged row per (bs, lr) that actually reaches this horizon.
         rows = (
             work.sort_values("step")
             .groupby(["bs", "lr"], as_index=False)
@@ -311,14 +331,17 @@ def build_minima_df(df: pd.DataFrame, cfg: Config) -> pd.DataFrame:
         )
 
         for bs, sub in rows.groupby("bs"):
+            # Ignore trajectories with large losses and require enough points for a fit.
             sub = sub[sub["train_loss"] < cfg.max_loss]
             if len(sub) < 3:
                 continue
 
+            # Prepare arrays for fitting the loss as a function of log2 output norm.
             x = sub["log2_output_norm"].to_numpy()
             y = sub["train_loss"].to_numpy()
             y_std = sub["train_loss_std"].to_numpy()       if "train_loss_std" in sub.columns else None
 
+            # Optionally run the quadratic fit unless this (h, bs) combination is skipped.
             do_fit = cfg.from_fit and (h, int(bs)) not in skip_pairs
             fit = compute_optimum(
                 x, y,
@@ -333,11 +356,13 @@ def build_minima_df(df: pd.DataFrame, cfg: Config) -> pd.DataFrame:
             if fit is None:
                 continue
 
+            # Find the observed point closest to the fitted minimum to report empirical stats.
             dx = sub["log2_output_norm"] - fit.x0
             dy = sub["train_loss"] - fit.y0
             idx_closest = (dx**2 + dy**2).idxmin()
             lr_closest = float(sub.at[idx_closest, "lr"])
 
+            # Record the per-horizon result for downstream plotting/analysis.
             frames.append(
                 dict(
                     horizon=h,
