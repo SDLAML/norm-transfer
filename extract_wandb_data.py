@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-WANDB_PROJECT = "atmlaml/norm-transfer"
+WANDB_PROJECT = "sdlaml-llm/norm-transfer"
 WANDB_GROUP = "eta-BS-scan-per-layer"
 METRIC_NAMES = [
                 "track_param_rms_to_l1/model_part_0/output", 
@@ -30,12 +30,12 @@ LR_GRID = [0.00048828, 0.00069053, 0.00097656, 0.00138107, 0.00195312, 0.0027621
            0.00006103515, 0.00024414, 0.00034527, 0.00012207, 1.5, 3.0, 6.0, 11.0, 14.0,
            8.0, 10.0, 12.0, 16.0,
            ]
-BS_GRID = np.logspace(3, 11, 9, base=2)
+BS_GRID = np.logspace(3, 12, 10, base=2)
 
 # Define the range of runs to process
 RUN_I, RUN_J = 0, 1000
-MOMENTUM = 1.0
-DECAYED = False
+MOMENTUM = 0.1
+DECAYED = True
 SEED = None
 BS_FILTER = None
 
@@ -60,7 +60,7 @@ OUTPUT_FILE = (
 os.makedirs(os.path.dirname(OUTPUT_FILE), exist_ok=True)
 
 # Initialize the Weights & Biases API
-api = wandb.Api(timeout=120)
+api = wandb.Api(timeout=180)
 filters = {"group": WANDB_GROUP}
 # if DECAYED: 
 #     filters["display_name"] = {"$regex": "decayed"}
@@ -100,6 +100,10 @@ for run in tqdm(runs[RUN_I:RUN_J], desc="Processing runs"):
     if momentum != MOMENTUM:
         continue
 
+    optimizer_name = next(
+        str(arg.split("=")[1]) for arg in args if arg.startswith("--optimizer.name=")
+    )
+
     run_history = run.scan_history(keys=METRIC_NAMES)
     run_df = pd.DataFrame(list(run_history))
     run_df['run_name'] = run_name
@@ -107,7 +111,13 @@ for run in tqdm(runs[RUN_I:RUN_J], desc="Processing runs"):
     run_df['seed'] = seed
     run_df['momentum'] = momentum
 
-    if all(run_df["lr/opt_0/group_0"] == run_df["lr/opt_0/group_1"]) and all(run_df["lr/opt_0/group_1"] == run_df["lr/opt_0/group_2"]):
+    # Adam ablation was run with LR schedule, so we extract LR values from args rather than logs
+    if optimizer_name.lower() == "adam" or WANDB_GROUP == "normalisation":
+        run_df['lr'] = next(float(arg.split("=")[1]) for arg in args if arg.startswith("--optimizer.lr="))
+        run_df['lr_hidden'] = run_df['lr']
+        run_df['lr_in'] = next(float(arg.split("=")[1]) for arg in args if arg.startswith("--optimizer.embed_lr="))
+        run_df['lr_out'] = next(float(arg.split("=")[1]) for arg in args if arg.startswith("--optimizer.unembed_lr="))
+    elif all(run_df["lr/opt_0/group_0"] == run_df["lr/opt_0/group_1"]) and all(run_df["lr/opt_0/group_1"] == run_df["lr/opt_0/group_2"]):
         assert len(np.unique(run_df["lr/opt_0/group_0"])) == 1
         run_df['lr'] = run_df["lr/opt_0/group_0"].iloc[0]
         run_df['lr_hidden'] = run_df['lr']
